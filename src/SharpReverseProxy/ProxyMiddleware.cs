@@ -17,10 +17,13 @@ namespace SharpReverseProxy
         {
             _next = next;
             _options = options.Value;
-            _httpClient = new HttpClient(_options.BackChannelMessageHandler ?? new HttpClientHandler
+            if (options.Value.HttpClientFactory == null)
             {
-                AllowAutoRedirect = _options.FollowRedirects
-            });
+                _httpClient = new HttpClient(_options.BackChannelMessageHandler ?? new HttpClientHandler
+                {
+                    AllowAutoRedirect = _options.FollowRedirects
+                });
+            }
         }
 
         public async Task Invoke(HttpContext context)
@@ -60,8 +63,9 @@ namespace SharpReverseProxy
             {
                 await ProxyTheRequest(context, proxyRequest, matchedRule, response);
             }
-            catch (HttpRequestException)
+            catch (Exception ex)
             {
+                Console.WriteLine(ex);
                 context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
             }
             _options.Reporter.Invoke(resultBuilder.Proxied(proxyRequest.RequestUri, context.Response.StatusCode));
@@ -69,9 +73,15 @@ namespace SharpReverseProxy
 
         private async Task ProxyTheRequest(HttpContext context, HttpRequestMessage proxyRequest, ProxyRule proxyRule, HttpResponseMessage response)
         {
-            using (var responseMessage = response ?? await _httpClient.SendAsync(proxyRequest,
-                                                                     HttpCompletionOption.ResponseHeadersRead,
-                                                                     context.RequestAborted))
+            var hc = (_options.HttpClientFactory == null ? _httpClient : (_options.HttpClientFactory(proxyRequest)));
+            if (hc == null)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                return;
+            }
+            using (var responseMessage = response ?? await hc.SendAsync(proxyRequest,
+                                                                      HttpCompletionOption.ResponseHeadersRead,
+                                                                      context.RequestAborted))
             {
 
                 if (proxyRule.PreProcessResponse || proxyRule.ResponseModifier == null)

@@ -3,24 +3,30 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 
-namespace SharpReverseProxy {
-    public class ProxyOptions {
+namespace SharpReverseProxy
+{
+    public class ProxyOptions
+    {
         public List<ProxyRule> ProxyRules { get; set; } = new List<ProxyRule>();
         public HttpMessageHandler BackChannelMessageHandler { get; set; }
         public Action<ProxyResult> Reporter { get; set; } = result => { };
+        public Func<HttpRequestMessage, HttpClient> HttpClientFactory { get; set; } = null;
 
         public bool FollowRedirects { get; set; } = true;
 
-        public ProxyOptions() {}
+        public ProxyOptions() { }
 
-        public ProxyOptions(List<ProxyRule> rules, Action<ProxyResult> reporter = null) {
+        public ProxyOptions(List<ProxyRule> rules, Action<ProxyResult> reporter = null)
+        {
             ProxyRules = rules;
-            if (reporter != null) {
+            if (reporter != null)
+            {
                 Reporter = reporter;
             }
         }
 
-        public void AddProxyRule(ProxyRule rule) {
+        public void AddProxyRule(ProxyRule rule)
+        {
             ProxyRules.Add(rule);
         }
     }
