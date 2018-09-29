@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
@@ -54,19 +55,52 @@ namespace SharpReverseProxy
             {
                 response = await matchedRule.Modifier.Invoke(proxyRequest, context.User);
             }
-
-            proxyRequest.Headers.Host = proxyRequest.RequestUri.IsDefaultPort
+            if (_options.HttpClientFactory == null)
+            {
+                proxyRequest.Headers.Host = proxyRequest.RequestUri.IsDefaultPort
                 ? proxyRequest.RequestUri.Host :
                 $"{proxyRequest.RequestUri.Host}:{proxyRequest.RequestUri.Port}";
+            }
+
 
             try
             {
                 await ProxyTheRequest(context, proxyRequest, matchedRule, response);
             }
+            catch (TimeoutException ex)
+            {
+                await ReturnContent(context, new HttpResponseMessage(System.Net.HttpStatusCode.GatewayTimeout)
+                {
+                    Content = new StringContent($"forward failed, host:{proxyRequest.Headers.Host}\r\nuri:{proxyRequest.RequestUri}\r\nheaders:{proxyRequest.Headers}\r\nException:{ex.Message}", System.Text.Encoding.UTF8, "text/plain")
+                });
+            }
+            catch (TaskCanceledException ex)
+            {
+                await ReturnContent(context, new HttpResponseMessage(System.Net.HttpStatusCode.GatewayTimeout)
+                {
+                    Content = new StringContent($"forward failed, host:{proxyRequest.Headers.Host}\r\nuri:{proxyRequest.RequestUri}\r\nheaders:{proxyRequest.Headers}\r\nException:{ex.Message}", System.Text.Encoding.UTF8, "text/plain")
+                });
+            }
+            catch (SocketException ex)
+            {
+                await ReturnContent(context, new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway)
+                {
+                    Content = new StringContent($"forward failed, host:{proxyRequest.Headers.Host}\r\nuri:{proxyRequest.RequestUri}\r\nheaders:{proxyRequest.Headers}\r\nException:{ex.Message}", System.Text.Encoding.UTF8, "text/plain")
+                });
+            }
+            catch (HttpRequestException ex)
+            {
+                await ReturnContent(context, new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway)
+                {
+                    Content = new StringContent($"forward failed, host:{proxyRequest.Headers.Host}\r\nuri:{proxyRequest.RequestUri}\r\nheaders:{proxyRequest.Headers}\r\nException:{ex.Message}", System.Text.Encoding.UTF8, "text/plain")
+                });
+            }
             catch (Exception ex)
             {
-                Console.WriteLine(ex);
-                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                await ReturnContent(context, new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError)
+                {
+                    Content = new StringContent($"forward failed, host:{proxyRequest.Headers.Host}\r\nuri:{proxyRequest.RequestUri}\r\nheaders:{proxyRequest.Headers}\r\nException:{ex}", System.Text.Encoding.UTF8, "text/plain")
+                });
             }
             _options.Reporter.Invoke(resultBuilder.Proxied(proxyRequest.RequestUri, context.Response.StatusCode));
         }
@@ -76,8 +110,10 @@ namespace SharpReverseProxy
             var hc = (_options.HttpClientFactory == null ? _httpClient : (_options.HttpClientFactory(proxyRequest)));
             if (hc == null)
             {
-                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-                return;
+                await ReturnContent(context, new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError)
+                {
+                    Content = new StringContent($"no available httpClient,host:{proxyRequest.Headers.Host}\r\nuri:{proxyRequest.RequestUri}\r\nheaders:{proxyRequest.Headers}", System.Text.Encoding.UTF8, "text/plain")
+                });
             }
             using (var responseMessage = response ?? await hc.SendAsync(proxyRequest,
                                                                       HttpCompletionOption.ResponseHeadersRead,
